@@ -1,0 +1,100 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+args = getResolvedOptions(sys.argv, ["JOB_NAME",'incomefilename_value'])
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args["JOB_NAME"], args)
+
+import json
+import boto3 
+from io import BytesIO
+import zipfile
+import urllib
+
+s3_resource = boto3.resource('s3')
+s3_client = boto3.client("s3")
+source_bucket= 'afsstmtzipfile'
+target_bucket= 'afsstmtunzipfile'
+archivebucket='afsstmtziparchive'
+my_bucket = s3_resource.Bucket(source_bucket)
+#filename=urllib.parse.unquote_plus(event["Records"][0]['s3']['object']['key'], encoding='utf-8')
+filename=args['incomefilename_value']
+#tarbkt=target_bucket+dir+'/'
+if(str(filename).endswith('.zip')):
+    zip_object= s3_resource.Object(bucket_name=source_bucket,key=filename)
+    buffer = BytesIO(zip_object.get()["Body"].read())
+    z = zipfile.ZipFile(buffer)
+    for filenme in z.namelist():
+        keywrd='ALSALAM_BANK'
+        if keywrd in filenme:
+           foldrname=filenme.split('ALSALAM_BANK_')[1]
+           #fl=foldrname.rpartition("_")[0]
+           #CIF=fl.rpartition("_")[-1]
+           keyword='PREPAID'
+           if keyword in filenme:
+              count = foldrname.count('_')
+              if count>=8:
+                foldrname=filenme.split('ALSALAM_BANK_')[1]
+                fl=foldrname.rpartition("_")[0]
+                month=fl.split("_-")[1]
+                mnth=month.split("_")[-3]
+                year = month.split("_")[-2]
+                cardtyp=fl.split("_CARD")[0]
+              else:
+                CIF='ERROR'
+                month = 'ERROR'
+                mnth = 'ERROR'
+                year = 'ERROR'
+                cardtyp='ERROR'  
+           else:
+               count = foldrname.count('_')
+               if count>=6:
+                    foldrname=filenme.split('ALSALAM_BANK_')[1]
+                    fl=foldrname.rpartition("_")[0]
+                    CIF=fl.rpartition("_")[-1]
+                    month = fl.split("_CARD_")[1]
+                    mnth = month.split("_")[0]
+                    year = month.split("_")[1]
+                    cardtyp=fl.split("_CARD")[0]
+               else:
+                    CIF='ERROR'
+                    month = 'ERROR'
+                    mnth = 'ERROR'
+                    year = 'ERROR'
+                    cardtyp='ERROR'
+              
+           try:
+              s3_resource.meta.client.upload_fileobj(z.open(filenme),Bucket=target_bucket,Key=f'{CIF}/{year}/{mnth}/{cardtyp}/{filenme}')
+           except Exception as e:
+              print(e)
+              continue
+        else:
+            foldrname="BMI"
+            CIF="BMI"
+            month="BMI"
+            mnth="BMI"
+            year = "BMI"
+            cardtyp="BMI"
+            try:
+                s3_resource.meta.client.upload_fileobj(z.open(filenme),Bucket=target_bucket,Key=f'{CIF}/{year}/{mnth}/{cardtyp}/{filenme}')
+            except Exception as e:
+                print(e)
+                continue
+        #print(foldrname)
+        #fl=dir.rpartition("_")[0]+'.pdf'
+        
+    copy_source = {'Bucket': source_bucket,'Key': filename}
+    bucket = s3_resource.Bucket(archivebucket)
+    bucket.copy(copy_source, filename)
+    responsedelete = s3_client.delete_object(Bucket=source_bucket, Key=filename)
+else:
+    print(filename+ "is not a zip file")
+
+job.commit()
