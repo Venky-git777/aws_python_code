@@ -1,0 +1,30 @@
+import json
+import urllib
+import boto3
+import os
+#import requests
+
+
+def lambda_handler(event, context):
+    # TODO implement
+    glue = boto3.client('glue')
+    s3 = boto3.client('s3')
+    inp=event['Records'][0]['body']
+    gluejbname=os.environ['gluejobnam']
+    try:
+        message_body = json.loads(inp)
+        filenm = message_body['Records'][0]['s3']['object']['key']
+        #gluejobname="extractstmtzip"
+        jobresponse = glue.start_job_run(JobName=gluejbname,Arguments = {'--incomefilename_value':  filenm})
+        #jobres = glue.get_job_run(JobName=gluejobname, RunId=jobresponse['Id'])
+        JobRunId=jobresponse['JobRunId']
+        dynamodb = boto3.resource('dynamodb') 
+        table = dynamodb.Table('afsstmtgluejob')
+        with table.batch_writer() as batch:
+            response=batch.put_item(
+            Item={'jobrunid': JobRunId,'filename': filenm}
+        )
+        print(JobRunId)
+        print(filenm)
+    except Exception as ex:
+        print(ex)      
